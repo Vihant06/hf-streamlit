@@ -12,6 +12,28 @@ from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, 
 from reportlab.lib.styles import getSampleStyleSheet
 from reportlab.lib import colors
 
+# Resume parsing
+try:
+    import pdfplumber
+except Exception:
+    pdfplumber = None
+try:
+    from docx import Document
+except Exception:
+    Document = None
+
+
+def extract_text(file):
+    name = file.name.lower()
+    if name.endswith('.pdf') and pdfplumber:
+        with pdfplumber.open(file) as pdf:
+            return "\n".join(p.extract_text() or "" for p in pdf.pages)
+    if name.endswith('.docx') and Document:
+        doc = Document(file)
+        return "\n".join(p.text for p in doc.paragraphs)
+    # txt/csv fallback
+    return file.read().decode('utf-8', errors='ignore')
+
 st.set_page_config(page_title="HireFair — Resume Bias Audit", layout="wide")
 
 # ---- Core ML functions ----
@@ -88,18 +110,56 @@ for i, label in enumerate(steps, 1):
 # =========================
 if st.session_state.step == 1:
     st.title("Step 1: Load Resumes")
-    st.markdown("Upload a CSV with columns: `resume_text`, `label` (1=shortlisted, 0=rejected), `group` (demographic attribute).")
-    file = st.file_uploader("Choose CSV", type=["csv"])
-    if file:
-        df = pd.read_csv(file)
-        required = {'resume_text','label','group'}
-        if not required.issubset(df.columns):
-            st.error(f"Missing columns. Need: {required}")
-        else:
-            st.session_state.df = df
-            st.success(f"Loaded {len(df)} rows")
-            st.dataframe(df.head(10), use_container_width=True)
-            st.info(f"Groups: {df['group'].nunique()} | Labels: {df['label'].value_counts().to_dict()}")
+    st.markdown("""
+**Option A:** Upload a CSV with columns `resume_text`, `label` (1=shortlisted, 0=rejected), `group` (demographic).
+
+**Option B:** Upload multiple resume files (PDF, DOCX, TXT) — you'll label them after upload.
+""")
+    
+    tab_csv, tab_files = st.tabs(["CSV Upload", "Resume Files (PDF/DOCX/TXT)"])
+    
+    with tab_csv:
+        file = st.file_uploader("Choose CSV", type=["csv"], key="csv_up")
+        if file:
+            df = pd.read_csv(file)
+            required = {'resume_text','label','group'}
+            if not required.issubset(df.columns):
+                st.error(f"Missing columns. Need: {required}")
+            else:
+                st.session_state.df = df
+                st.success(f"Loaded {len(df)} rows")
+                st.dataframe(df.head(10), use_container_width=True)
+    
+    with tab_files:
+        files = st.file_uploader(
+            "Upload resume files", type=["pdf","docx","txt"], 
+            accept_multiple_files=True, key="resume_up"
+        )
+        if files:
+            st.info(f"{len(files)} files uploaded. Extract text, then assign label & group below.")
+            rows = []
+            for f in files:
+                text = extract_text(f)
+                rows.append({"file": f.name, "resume_text": text[:5000], "label": 1, "group": "unknown"})
+            df_files = pd.DataFrame(rows)
+            
+            # Editable table for labels/groups
+            edited = st.data_editor(
+                df_files[["file","label","group"]],
+                column_config={
+                    "label": st.column_config.SelectboxColumn("Label", options=[0,1], required=True),
+                    "group": st.column_config.TextColumn("Group", required=True),
+                },
+                hide_index=True,
+                use_container_width=True,
+                num_rows="fixed"
+            )
+            # Merge text back
+            df_final = df_files.drop(columns=["label","group"]).merge(edited, on="file")
+            if st.button("Use These Resumes", type="primary"):
+                st.session_state.df = df_final.drop(columns=["file"])
+                st.success(f"Ready with {len(df_final)} resumes")
+                st.dataframe(st.session_state.df.head(10), use_container_width=True)
 
 # =========================
 # STEP 2: Baseline
