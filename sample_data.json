@@ -1,0 +1,11 @@
+{
+  "resume_text": [
+    "Experienced software engineer with Python and machine learning skills",
+    "Marketing specialist with strong communication and leadership abilities",
+    "Data analyst proficient in SQL and statistics",
+    "Project manager with PMP certification and team leadership",
+    "Junior developer with React and JavaScript experience"
+  ],
+  "label": [1, 1, 0, 1, 0],
+  "group": ["male", "female", "male", "female", "male"]
+}
